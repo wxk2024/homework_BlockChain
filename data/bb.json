@@ -1,0 +1,26 @@
+{
+    "blockchain": [
+        {
+            "block": {
+                "Timestamp": "2024-11-12T14:14:12.815734+00:00",
+                "Transactions": [
+                    {
+                        "Hash": "",
+                        "Vin": [],
+                        "Vout": [
+                            {
+                                "value": 100,
+                                "pubkey": "e6fddd3c82ea7e5f557f7a6d7a5c1178c556275b880f1a56675f7438fb4b65aae7169c5fa6d1383752ec3b59083a2b9623b194bff86817fe42d04c14ecf91226"
+                            }
+                        ]
+                    }
+                ],
+                "PrevBlockHash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "Hash": "d30b59a7cf7c95c41a66308f08cbedbf2ff312aec93c69eed337adde932d886a",
+                "Nonce": 0,
+                "Height": 0,
+                "Difficulty": 4
+            }
+        }
+    ]
+}
