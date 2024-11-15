@@ -52,7 +52,7 @@ class Transaction:
         if len(self.Vout) <= 0 :
             raise Exception("len(Vout) <= 0")
 
-    def verify(self):
+    def verify(self,bc):
         """
         1.检查 vin 是否在区块中
         2.检查余额是否足够
@@ -63,7 +63,7 @@ class Transaction:
         usable_money = 0
         for input_obj in self.Vin:
             # 假设这里有一个函数可以检查输入是否在区块中，比如 check_input_in_block(input_obj.txid, input_obj.vout)
-            is_in_block,num_money = self.check_input_in_block(input_obj.txid, input_obj.vout)
+            is_in_block,num_money = self._check_input_in_block(input_obj.txid, input_obj.vout,bc)
             if not is_in_block:
                 raise Exception("vin 不在区块中")
             usable_money+=num_money
@@ -77,7 +77,8 @@ class Transaction:
             expend_money += output_obj.value
         if usable_money < expend_money:
             raise Exception("花的钱太多了")
-
+        # 验证通过后，进行求hash
+        self._set_hash()
     def sign(self, priv_key):
         signing_key = SigningKey.from_string(bytes.fromhex(priv_key), curve=SECP256k1)
         for input_obj in self.Vin:
@@ -85,7 +86,7 @@ class Transaction:
             signature = signing_key.sign(message)
             input_obj.signature = signature.hex()   # A 对交易进行了签名，接下来就需要验证
 
-    def set_hash(self)->None:
+    def _set_hash(self)->None:
         self.Hash = self.hash()
     def hash(self)->str:
         transaction_data = {
@@ -98,7 +99,7 @@ class Transaction:
         self.Hash = hashlib.sha256(json_data.encode()).hexdigest()
         return self.Hash
 
-    def check_input_in_block(self, txid, vout)->(bool,int):
+    def _check_input_in_block(self, txid:str, vout:int, bc)->(bool, int):
         """
         检查来源是否在区块中，并返回钱的数量
 
@@ -106,17 +107,14 @@ class Transaction:
         :param vout: 交易中那一笔输出
         :return: (bool,int) : 是否在区块中，钱是多少
         """
-        usable_money = 0
-        blockchain = BlockChain()
-        blockchain.read_blockchain("blockchain_data.json")  # 假设区块链数据存储在这个文件中
 
-        for block in blockchain.blocks:
+        for block in bc.blocks:
             for transaction in block.Transactions:
                 if transaction.Hash == txid and len(transaction.Vout)>vout:
-                    usable_money += transaction.Vout[vout].value
-                    return (True, usable_money)
+                    usable_money = transaction.Vout[vout].value
+                    return True, usable_money
 
-        return (False,usable_money)
+        return False,0
     def verify_input_signature(self,input_obj):
         verifying_key = ecdsa.VerifyingKey.from_string(bytes.fromhex(input_obj.pubkey), curve=ecdsa.SECP256k1)
         message = f"{input_obj.txid}{input_obj.vout}".encode()
@@ -124,12 +122,18 @@ class Transaction:
             return verifying_key.verify(bytes.fromhex(input_obj.signature), message)
         except ecdsa.BadSignatureError:
             return False
-    def to_dict(self)->dict:
+    def to_dict(self)->Dict:
         return {
             "Hash": self.Hash,
             "Vin":[i.to_dict() for i in self.Vin],
             "Vout":[o.to_dict() for o in self.Vout]
         }
+    @staticmethod
+    def from_dict(t: Dict) -> 'Transaction':
+        vin: List[Input] = [Input(**input_data) for input_data in t['Vin']]
+        vout: List[Output] = [Output(**output_data) for output_data in t['Vout']]
+        transaction = Transaction(Hash=t['Hash'], Vin=vin, Vout=vout)
+        return transaction
 
 @dataclass
 class Block:
@@ -201,11 +205,19 @@ class BlockChain:
         self.blocks:List[Block] = blocks
         self.current_hash:str = current_hash  # 最新区块的哈希值
         self.height:int = height         # 区块链的高度
+
+    def __getitem__(self, index):
+        return self.blocks[index]
+    def __len__(self):
+        return self.height
     def add_block(self,block:Block):
         '''
         添加区块，传入一个block对象，加入blocks数组并更新current_hash和height
         :return:
         '''
+        assert(block.Hash is not None)
+        assert(block.PrevBlockHash == self.current_hash) # self.blocks 中至少有一个
+        assert(len(block.Transactions)!=0)
         self.blocks.append(block)
         self.current_hash = block.Hash
         self.height += 1
@@ -220,13 +232,23 @@ class BlockChain:
             if block.Hash == block_hash:
                 return block
         return None
-    def save_blockchain(self, file_path: str) -> None:
+    def to_dict(self)->Dict:
         blocks_data = [block.to_dict() for block in self.blocks]
         blockchain_data = {
             'blockchain': [{'block': block_data} for block_data in blocks_data]
         }
+        return blockchain_data
+    def save_blockchain(self, file_path: str) -> None:
         with open(file_path, 'w') as f:
-            json.dump(blockchain_data, f, indent=4)
+            json.dump(self.to_dict(), f, indent=4)
+    def get_blocks_after_time(self,timestamp:datetime)->List[Block]:
+        res = []
+        for block in self.blocks[::-1]:
+            if block.Timestamp > timestamp:
+                res.insert(0, block)
+        return res
+    def get_last_block_hash(self):
+        return self.current_hash
     @staticmethod
     def read_blockchain(file_path: str) -> 'BlockChain':
         with open(file_path, 'r') as f:

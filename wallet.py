@@ -20,7 +20,7 @@ class Wallet:
     private_key: str = None
     address: str = None
 
-    def new_address(self):
+    def new_address(self)->'Wallet':
         # 生成私钥
         private_key = SigningKey.generate(curve=SECP256k1)
         self.private_key = private_key.to_string().hex()
@@ -56,7 +56,7 @@ class Wallet:
         # 进行Base58编码得到最终的比特币地址
         self.address = b58encode_check(address_bytes).decode()
 
-        return self.address
+        return self
 
     def load_from_file(self, file_path):
         if os.path.exists(file_path):
@@ -79,17 +79,12 @@ class Wallet:
 
 
 if __name__ == '__main__':
-    def generate_mnemonic_wallet():
-        wallet = Wallet()
-        wallet.new_address()
-        return wallet
-
-    # 示例用法：生成新钱包并保存到文件
-    wallet = generate_mnemonic_wallet()
-    print(f"地址: {wallet.address}")
-    wallet.save_to_file('wallet.json')
     # 示例用法：从文件加载钱包
-    loaded_wallet = Wallet()
-    loaded_wallet.load_from_file('wallet.json')
-    print(f"加载的地址: {loaded_wallet.address}")
+    wallet_a = Wallet()
+    wallet_a.load_from_file('./data/wallet_a.json')
+    print(f"加载的地址: {wallet_a.address}")
+
+    wallet_b = Wallet()
+    wallet_b.load_from_file('./data/wallet_b.json')
+    print(f"加载的地址: {wallet_b.address}")
 
