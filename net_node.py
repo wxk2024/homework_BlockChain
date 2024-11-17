@@ -141,6 +141,7 @@ class MinerNode(Router):
     def __init__(self, own_port:int,blockchain_file: str):
         super().__init__(own_port)
         self.transaction_list:List[Transaction] = []            # 临时的保存的交易池
+        self.orphan_blocks:List[Block] = []                     # 孤儿交易池
         self.blockchain:BlockChain = BlockChain.read_blockchain(blockchain_file) # 本矿工节点的区块链
         self.add_routes('/addBlock',methods=['POST'], view_func=self.addBlock_handler)
         self.add_routes('/getBlockChain',methods=['GET'],view_func=self.getBlockChain_handler)
@@ -161,7 +162,20 @@ class MinerNode(Router):
         block_data = response['block']
         assert(isinstance(block_data,dict))
         block = Block.from_dict(block_data)
-        self.blockchain.add_block(block)
+
+        # 清理一下已经被别人打包的交易
+        filtered_transactions = [tx for tx in self.transaction_list if not block.is_transaction_in(tx.Hash)]
+        self.transaction_list = filtered_transactions
+
+
+        if not self.blockchain.add_block(block):
+            # 如果是孤儿节点，则加入到孤儿池中，等待父节点被添加后，再尝试添加
+            self.orphan_blocks.append(block)
+            print("orphan block")
+            print("current_hash: ",self.blockchain.current_hash," block_hash: ",block.Hash)
+            return jsonify({"code":400,"message":"Orphan block."}),400
+        # 查看孤儿池中是否有子节点可以添加
+        self._orphan_block_to_blockchain(block.Hash)
         self._save()
         return jsonify({"code":200,"message":"Block added."}),200
 
@@ -211,8 +225,29 @@ class MinerNode(Router):
             self._save()
 
     def _save(self):
+        '''
+        模拟保存区块链
+        :return:
+        '''
         addr = f"./data/{self.own_ip}_{self.own_port}.json"
         self.blockchain.save_blockchain(addr)
+
+    def _orphan_block_to_blockchain(self, father_block_hash:str):
+        """将孤儿池中的父节点为 father_block_hash 的区块添加到区块链中"""
+        if father_block_hash == "":
+            return
+        orphan_block_hash = ""
+        for orphan_block in self.orphan_blocks:
+            if orphan_block.PrevBlockHash == father_block_hash:
+                self.blockchain.add_block(orphan_block)
+                print("orphan block added")
+                orphan_block_hash = orphan_block.Hash
+                self.orphan_blocks.remove(orphan_block)
+                break
+        # 孤儿池中可能还有其他孤儿，需要继续遍历
+        return self._orphan_block_to_blockchain(orphan_block_hash)
+
+
 
 if __name__ == '__main__':
     # 单独启动一个 router

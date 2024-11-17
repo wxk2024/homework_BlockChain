@@ -144,6 +144,26 @@ class Block:
     Nonce: int
     Height: int
     Difficulty: int = field(default=4)  # 添加难度字段，默认为4，可根据需要调整
+    Merkle_Tree: List[List[str]] = field(default=None)
+    def __post_init__(self):
+        self._build_merkle_tree()
+    def _build_merkle_tree(self):
+        # 参考：https://blog.csdn.net/wo541075754/article/details/54632929
+        self.Merkle_Tree = []
+        l = [h.Hash for h in self.Transactions]
+        self.Merkle_Tree.insert(0, l)
+
+        while len(self.Merkle_Tree[0]) > 1:
+            new_level = []
+            for i in range(0, len(self.Merkle_Tree[0]), 2):
+                left = self.Merkle_Tree[0][i]
+                right = self.Merkle_Tree[0][i + 1] if i + 1 < len(self.Merkle_Tree[0]) else None
+                if right is None:
+                    new_hash = left
+                else:
+                    new_hash = hashlib.sha256(left.encode() + right.encode()).hexdigest()
+                new_level.append(new_hash)
+            self.Merkle_Tree.insert(0, new_level)
 
     @staticmethod
     def new_block(transactions:List[Transaction], prev_hash:str, height:int,difficulty:int)->'Block':
@@ -169,6 +189,12 @@ class Block:
         outer_hash = hashlib.sha256(inner_hash).hexdigest()
         self.Hash = outer_hash
         return outer_hash
+
+    def is_transaction_in(self, transaction_hash: str):
+        for tx in self.Transactions:
+            if tx.Hash == transaction_hash:
+                return True
+        return False
     def to_dict(self):
         return {
             'Timestamp': self.Timestamp.isoformat(),
@@ -177,10 +203,12 @@ class Block:
             'Hash': self.Hash,
             'Nonce': self.Nonce,
             'Height': self.Height,
-            'Difficulty': self.Difficulty
+            'Difficulty': self.Difficulty,
+            'Merkle_Tree': self.Merkle_Tree
         }
+
     @staticmethod
-    def from_dict(b:Dict)->'Block':
+    def from_dict(b: Dict) -> 'Block':
         transactions = []
         for t in b['Transactions']:
             vin: List[Input] = [Input(**input_data) for input_data in t['Vin']]
@@ -195,9 +223,11 @@ class Block:
             Height=b['Height'],
             Difficulty=b['Difficulty'],
             Hash=b['Hash'],
-            Nonce=b['Nonce']
+            Nonce=b['Nonce'],
+            Merkle_Tree=b.get('Merkle_Tree', [])  # 增加 Merkle_Tree 成员变量，默认为空列表
         )
         return block
+
 
 @dataclass
 class BlockChain:
@@ -210,18 +240,20 @@ class BlockChain:
         return self.blocks[index]
     def __len__(self):
         return self.height
-    def add_block(self,block:Block):
+    def add_block(self,block:Block)->bool:
         '''
         添加区块，传入一个block对象，加入blocks数组并更新current_hash和height
         :return:
         '''
         assert(block.Hash is not None)
-        assert(block.PrevBlockHash == self.current_hash) # self.blocks 中至少有一个
         assert(len(block.Transactions)!=0)
+        if block.PrevBlockHash != self.current_hash: # self.blocks 中至少有一个
+            # 孤儿交易
+            return False
         self.blocks.append(block)
         self.current_hash = block.Hash
         self.height += 1
-        pass
+        return True
     def get_block(self,block_hash:str)->Block:
         '''
         通过 block 的 hash 值来查找区块，返回一个block对象
@@ -267,12 +299,12 @@ if __name__ == '__main__':
     # 创建钱包A并生成地址
     wallet_a = Wallet()
     wallet_a.new_address()
-    wallet_a.save_to_file("wallet_a.json")
+    # wallet_a.save_to_file("wallet_a.json")
 
     # 创建钱包B并生成地址
     wallet_b = Wallet()
     wallet_b.new_address()
-    wallet_b.save_to_file("wallet_b.json")
+    # wallet_b.save_to_file("wallet_b.json")
     # 创建给钱包A转账的交易（创世交易）
     genesis_transaction = Transaction(
         Hash="",
@@ -293,8 +325,8 @@ if __name__ == '__main__':
 
     # 创建区块链并添加创世区块
     blockchain = BlockChain()
-    blockchain.add_block(genesis_block)
-    blockchain.save_blockchain("blockchain_data.json")
+    # blockchain.add_block(genesis_block)
+    # blockchain.save_blockchain("blockchain_data.json")
 
     # 创建从钱包A向钱包B转账5个比特币的交易
     transfer_transaction = Transaction(
@@ -309,26 +341,39 @@ if __name__ == '__main__':
               Output(value=95, pubkey=wallet_a.pub_key)] # 给 A 自己转钱
     )
     transfer_transaction.sign(wallet_a.private_key)
-    transfer_transaction.verify()
-    transfer_transaction.set_hash()
+    # transfer_transaction.verify()
+    transfer_transaction._set_hash()
 
     # 创建新区块并添加转账交易
     transfer_block = Block(
         Timestamp=datetime.now(timezone.utc),
-        Transactions=[transfer_transaction],
+        Transactions=[transfer_transaction,transfer_transaction,transfer_transaction,transfer_transaction,transfer_transaction],
         PrevBlockHash=genesis_block.Hash,
         Height=1,
         Hash="",
         Nonce=0
     )
     transfer_block.set_hash()
-    blockchain.add_block(transfer_block)
+    print(transfer_block.Merkle_Tree)
+    # blockchain.add_block(transfer_block)
 
     # 保存区块链到文件（这里只是示例，实际应用中文件路径等可根据需求调整）
-    blockchain.save_blockchain("blockchain_data.json")
+    # blockchain.save_blockchain("blockchain_data.json")
 
-    bb = BlockChain.read_blockchain("blockchain_data.json")
-    bb.save_blockchain("bb.json")
+    # bb = BlockChain.read_blockchain("blockchain_data.json")
+    # bb.save_blockchain("bb.json")
+
+    # 保存 transfer_block 到 .json
+    with open("transfer_block.json", "w") as f:
+        json.dump(transfer_block.to_dict(), f, indent=4)
+        print(transfer_block.to_dict())
+        print("保存成功")
+    # 读取 transfer_block
+    with open("transfer_block.json", "r") as f:
+        transfer_block_data = json.load(f)
+        transfer_block_from_json = Block.from_dict(transfer_block_data)
+        print(transfer_block_from_json.to_dict())
+        print("读取成功")
 
 
 

@@ -1,7 +1,6 @@
 
 from wallet import Wallet
 from block import Transaction,Input,Output,Block
-from datetime import datetime,timezone
 import requests
 import time
 
@@ -25,9 +24,9 @@ if __name__ == '__main__':
                 txid="",  # 使用创世区块的那笔交易
                 vout=0,
                 signature="",  # 等待 A 进行签名
-                pubkey=wallet_a.pub_key  # A 需要花钱，因此 使用 A 的公钥
+                pubkey=wallet_a.pub_key  # A 需要花钱，因此 使用 A 的公钥来证明所属
             )],
-            Vout=[Output(value=5, pubkey=wallets[i].pub_key),  # 给 B 转钱
+            Vout=[Output(value=5, pubkey=wallets[i].pub_key),  # 给 对方 转钱
                   Output(value=95, pubkey=wallet_a.pub_key)]  # 给 A 自己转钱
         )
         transfer_transaction.sign(wallet_a.private_key)
@@ -37,6 +36,6 @@ if __name__ == '__main__':
             response = requests.post(f"http://{address}/post_transaction", json={"transaction":transfer_transaction.to_dict()})
             print(response.text)
             k+=1
-        time.sleep(2)
+        time.sleep(10)
 
     print("finished: ", k)
