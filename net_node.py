@@ -141,6 +141,7 @@ class MinerNode(Router):
     def __init__(self, own_port:int,blockchain_file: str):
         super().__init__(own_port)
         self.transaction_list:List[Transaction] = []            # 临时的保存的交易池
+        self.transaction_list_lock = threading.Lock()           # 锁
         self.orphan_blocks:List[Block] = []                     # 孤儿交易池
         self.blockchain:BlockChain = BlockChain.read_blockchain(blockchain_file) # 本矿工节点的区块链
         self.add_routes('/addBlock',methods=['POST'], view_func=self.addBlock_handler)
@@ -153,8 +154,13 @@ class MinerNode(Router):
         transaction_data = response['transaction']
         assert (isinstance(transaction_data, dict))
         transact = Transaction.from_dict(transaction_data)
-        transact.verify(self.blockchain)               # 进行验证
-        self.transaction_list.append(transact)
+        # 检查 transact 是否已经在 self.transaction_list 中，防止重复
+        with self.transaction_list_lock:
+            for tx in self.transaction_list:
+                if tx.Hash == transact.Hash:
+                    return jsonify({"code":400,"message":"Duplicate transaction"}),400
+            transact.verify(self.blockchain)               # 进行验证
+            self.transaction_list.append(transact)
         return {"code":200,"message":"Transaction received successfully"}
 
     def addBlock_handler(self):
@@ -164,8 +170,9 @@ class MinerNode(Router):
         block = Block.from_dict(block_data)
 
         # 清理一下已经被别人打包的交易
-        filtered_transactions = [tx for tx in self.transaction_list if not block.is_transaction_in(tx.Hash)]
-        self.transaction_list = filtered_transactions
+        with self.transaction_list_lock:
+            filtered_transactions = [tx for tx in self.transaction_list if not block.is_transaction_in(tx.Hash)]
+            self.transaction_list = filtered_transactions
 
 
         if not self.blockchain.add_block(block):
@@ -205,23 +212,23 @@ class MinerNode(Router):
         while True:
             '''TODO 挖矿逻辑可以在这里补充'''
             time.sleep(random.randint(1,10))
-            if len(self.transaction_list) == 0:
-                continue
-
-            block = Block(
-                Timestamp=datetime.datetime.now(timezone.utc),
-                Transactions=deepcopy(self.transaction_list),
-                PrevBlockHash=deepcopy(self.blockchain.current_hash),
-                Hash="",
-                Nonce=0,                               # 和挖矿相关的字段
-                Height=self.blockchain.height,         # 和当前节点相关
-                Difficulty=4                           # 当前无用
-            )
-            block.set_hash()
-            assert(len(block.Transactions)!=0)
-            self.blockchain.add_block(block)
-            self.addBlock()             # 广播出去
-            self.transaction_list.clear()
+            with self.transaction_list_lock:
+                if len(self.transaction_list) == 0:
+                    continue
+                block = Block(
+                    Timestamp=datetime.datetime.now(timezone.utc),
+                    Transactions=deepcopy(self.transaction_list),
+                    PrevBlockHash=deepcopy(self.blockchain.current_hash),
+                    Hash="",
+                    Nonce=0,                               # 和挖矿相关的字段
+                    Height=self.blockchain.height,         # 和当前节点相关
+                    Difficulty=4                           # 当前无用
+                )
+                block.set_hash()
+                assert(len(block.Transactions)!=0)
+                self.blockchain.add_block(block)
+                self.addBlock()             # 广播出去
+                self.transaction_list.clear()
             self._save()
 
     def _save(self):
